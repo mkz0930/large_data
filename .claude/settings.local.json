@@ -1,0 +1,97 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "prompt",
+            "prompt": "自动加载编码规范：请读取并遵循 .claude/skills/prules/SKILL.md 中的所有规则。这是用户的个人编码标准，包括 TDD、文档维护、4阶段工作流程等要求。任何涉及代码变更的任务都必须遵循此规范。"
+          }
+        ]
+      }
+    ]
+  },
+  "permissions": {
+    "allow": [
+      "Bash(awk:*)",
+      "Bash(build the project)",
+      "Bash(cargo:*)",
+      "Bash(cat:*)",
+      "Bash(cd:*)",
+      "Bash(choco --version:*)",
+      "Bash(chmod:*)",
+      "Bash(cmd //c \"mklink /? 2>&1 | head -5\")",
+      "Bash(cp:*)",
+      "Bash(curl:*)",
+      "Bash(echo:*)",
+      "Bash(edit:*)",
+      "Bash(execute project scripts)",
+      "Bash(find:*)",
+      "Bash(findstr:*)",
+      "Bash(gh --version:*)",
+      "Bash(gh auth status:*)",
+      "Bash(gh repo create:*)",
+      "Bash(git:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git init:*)",
+      "Bash(go:*)",
+      "Bash(glob:*)",
+      "Bash(gradle:*)",
+      "Bash(grep:*)",
+      "Bash(head:*)",
+      "Bash(install dependencies)",
+      "Bash(jest:*)",
+      "Bash(ls:*)",
+      "Bash(make:*)",
+      "Bash(mkdir:*)",
+      "Bash(mv:*)",
+      "Bash(mvn:*)",
+      "Bash(node:*)",
+      "Bash(npm:*)",
+      "Bash(pnpm:*)",
+      "Bash(powershell.exe -Command \"gh --version\")",
+      "Bash(PYTHONPATH=/d/Product/data_summary python:*)",
+      "Bash(python:*)",
+      "Bash(pytest:*)",
+      "Bash(rm:*)",
+      "Bash(read:*)",
+      "Bash(run code quality checks)",
+      "Bash(run linter or formatter)",
+      "Bash(run tests)",
+      "Bash(scoop --version:*)",
+      "Bash(sed:*)",
+      "Bash(sqlite3:*)",
+      "Bash(taskkull:*)",
+      "Bash(tasklist:*)",
+      "Bash(tee:*)",
+      "Bash(test:*)",
+      "Bash(tree:*)",
+      "Bash(vitest:*)",
+      "Bash(where:*)",
+      "Bash(winget:*)",
+      "Bash(write:*)",
+      "Bash(yarn:*)",
+      "Skill(prules)",
+      "Skill(apply-coding-standards)",
+      "Bash(timeout 180 tail:*)",
+      "Bash(dir:*)",
+      "Skill(skill-creator)",
+      "Skill(skill-creator:*)",
+      "Bash(for file in comments-guide.md error-handling-guide.md code-organization-guide.md git-workflow-guide.md workflow-checklist.md)",
+      "Bash(do if [ -f \".claude/skills/prules/coding-standards/$file\" ])",
+      "Bash(then echo \"✓ $file 存在\")",
+      "Bash(else echo \"✗ $file 不存在\")",
+      "Bash(fi)",
+      "Bash(done)",
+      "Bash(powershell.exe -ExecutionPolicy Bypass -File \"D:\\\\Product\\\\data_summary\\\\.claude\\\\skills\\\\prules\\\\install.ps1\" -TargetProject \"D:\\\\learn\\\\test_skill\")",
+      "Bash(wc:*)",
+      "Bash(claude config list:*)",
+      "Bash(du:*)"
+    ],
+    "additionalDirectories": [
+      "d:\\Product\\data_summary\\output"
+    ]
+  },
+  "language": "zh-cn"
+}
