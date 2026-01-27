@@ -100,6 +100,22 @@ class BatchScraperDB:
                     UNIQUE(asin, keyword, created_date)
                 );
 
+                -- 卖家精灵历史数据缓存表（用于步骤7.5数据补充）
+                CREATE TABLE IF NOT EXISTS sellerspirit_history_cache (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    asin TEXT NOT NULL UNIQUE,
+                    sales_3m INTEGER,              -- 最近3个月销量
+                    ss_monthly_sales INTEGER,      -- 卖家精灵月销量
+                    listing_date TEXT,             -- 上架日期
+                    avg_monthly_sales INTEGER,     -- 平均月销量
+                    sales_months_count INTEGER,    -- 有销量数据的月份数
+                    ss_rating REAL,                -- 卖家精灵评分
+                    ss_reviews INTEGER,            -- 卖家精灵评论数
+                    raw_trends TEXT,               -- 原始 trends 数据（JSON）
+                    created_at TEXT DEFAULT (datetime('now')),
+                    updated_at TEXT DEFAULT (datetime('now'))
+                );
+
                 -- 索引
                 CREATE INDEX IF NOT EXISTS idx_asins_keyword ON asins(keyword);
                 CREATE INDEX IF NOT EXISTS idx_asins_category ON asins(category);
@@ -107,6 +123,7 @@ class BatchScraperDB:
                 CREATE INDEX IF NOT EXISTS idx_category_stats_keyword ON category_stats(keyword);
                 CREATE INDEX IF NOT EXISTS idx_sellerspirit_keyword ON sellerspirit_data(keyword);
                 CREATE INDEX IF NOT EXISTS idx_sellerspirit_asin ON sellerspirit_data(asin);
+                CREATE INDEX IF NOT EXISTS idx_ss_history_cache_asin ON sellerspirit_history_cache(asin);
             """)
 
     def _migrate_db(self):
@@ -1326,3 +1343,137 @@ class BatchScraperDB:
                     'sales_months_count': row['sales_months_count']
                 })
             return results
+
+    def update_price_history(self, keyword: str, asin: str, price_data: Dict) -> bool:
+        """
+        更新单个 ASIN 的价格历史数据
+
+        Args:
+            keyword: 搜索关键词
+            asin: ASIN
+            price_data: 价格历史数据字典，包含：
+                - price_min: 历史最低价
+                - price_max: 历史最高价
+                - price_min_date: 最低价日期
+                - price_max_date: 最高价日期
+
+        Returns:
+            是否更新成功
+        """
+        try:
+            with sqlite3.connect(str(self.db_path)) as conn:
+                conn.execute("""
+                    UPDATE asins
+                    SET price_min = ?, price_max = ?, price_min_date = ?, price_max_date = ?
+                    WHERE asin = ? AND keyword = ?
+                """, (
+                    price_data.get('price_min'),
+                    price_data.get('price_max'),
+                    price_data.get('price_min_date'),
+                    price_data.get('price_max_date'),
+                    asin,
+                    keyword
+                ))
+                conn.commit()
+                return True
+        except Exception as e:
+            logger.error(f"更新价格历史 {asin} 失败: {e}")
+            return False
+
+    # ==================== 卖家精灵历史数据缓存方法 ====================
+
+    def get_cached_sellerspirit_history(self, asins: List[str], cache_days: int = 20) -> Dict[str, Dict]:
+        """
+        获取缓存的卖家精灵历史数据（在缓存有效期内）
+
+        Args:
+            asins: ASIN 列表
+            cache_days: 缓存有效期（天），默认 20 天
+
+        Returns:
+            ASIN -> 历史数据的映射
+        """
+        if not asins:
+            return {}
+
+        with sqlite3.connect(str(self.db_path)) as conn:
+            conn.row_factory = sqlite3.Row
+            # 使用参数化查询，避免 SQL 注入
+            placeholders = ','.join('?' * len(asins))
+            cursor = conn.execute(f"""
+                SELECT asin, sales_3m, ss_monthly_sales, listing_date,
+                       avg_monthly_sales, sales_months_count, ss_rating, ss_reviews
+                FROM sellerspirit_history_cache
+                WHERE asin IN ({placeholders})
+                AND datetime(updated_at) >= datetime('now', '-{cache_days} days')
+            """, asins)
+            rows = cursor.fetchall()
+
+            result = {}
+            for row in rows:
+                result[row['asin']] = {
+                    'sales_3m': row['sales_3m'],
+                    'ss_monthly_sales': row['ss_monthly_sales'],
+                    'listing_date': row['listing_date'],
+                    'avg_monthly_sales': row['avg_monthly_sales'],
+                    'sales_months_count': row['sales_months_count'],
+                    'ss_rating': row['ss_rating'],
+                    'ss_reviews': row['ss_reviews']
+                }
+            return result
+
+    def save_sellerspirit_history_cache(self, history_map: Dict[str, Dict]) -> int:
+        """
+        保存卖家精灵历史数据到缓存
+
+        Args:
+            history_map: ASIN -> 历史数据的映射
+
+        Returns:
+            保存成功的数量
+        """
+        import json
+        saved_count = 0
+        with sqlite3.connect(str(self.db_path)) as conn:
+            for asin, data in history_map.items():
+                try:
+                    # 使用 INSERT OR REPLACE 更新缓存
+                    conn.execute("""
+                        INSERT OR REPLACE INTO sellerspirit_history_cache
+                        (asin, sales_3m, ss_monthly_sales, listing_date,
+                         avg_monthly_sales, sales_months_count, ss_rating, ss_reviews,
+                         raw_trends, updated_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+                    """, (
+                        asin,
+                        data.get('sales_3m'),
+                        data.get('ss_monthly_sales'),
+                        data.get('listing_date'),
+                        data.get('avg_monthly_sales'),
+                        data.get('sales_months_count'),
+                        data.get('ss_rating'),
+                        data.get('ss_reviews'),
+                        json.dumps(data.get('raw_trends'), ensure_ascii=False) if data.get('raw_trends') else None
+                    ))
+                    saved_count += 1
+                except Exception as e:
+                    logger.error(f"保存卖家精灵历史缓存 {asin} 失败: {e}")
+            conn.commit()
+        return saved_count
+
+    def get_asins_needing_history_fetch(self, asins: List[str], cache_days: int = 20) -> List[str]:
+        """
+        获取需要从 API 获取历史数据的 ASIN 列表（排除已缓存的）
+
+        Args:
+            asins: 待检查的 ASIN 列表
+            cache_days: 缓存有效期（天），默认 20 天
+
+        Returns:
+            需要获取的 ASIN 列表
+        """
+        if not asins:
+            return []
+
+        cached_data = self.get_cached_sellerspirit_history(asins, cache_days)
+        return [asin for asin in asins if asin not in cached_data]

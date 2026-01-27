@@ -86,8 +86,27 @@ class ApifyDB:
             return False
 
         try:
-            # 计算历史最低价和最高价
-            price_min, price_max, price_min_date, price_max_date = self._calc_price_history(data)
+            # Keepa 等来源可能直接提供 price_min/price_max，在没有历史字段时不应被覆盖
+            provided_price_min = data.get('price_min')
+            provided_price_max = data.get('price_max')
+            provided_price_min_date = data.get('price_min_date')
+            provided_price_max_date = data.get('price_max_date')
+
+            history_fields = ['price_amazon_history', 'price_buybox_history', 'price_new_history']
+            has_history = any(data.get(field) for field in history_fields)
+
+            if has_history:
+                # 优先使用历史记录计算结果，缺失时再回落到提供值
+                calc_min, calc_max, calc_min_date, calc_max_date = self._calc_price_history(data)
+                price_min = calc_min if calc_min is not None else provided_price_min
+                price_max = calc_max if calc_max is not None else provided_price_max
+                price_min_date = calc_min_date if calc_min_date else provided_price_min_date
+                price_max_date = calc_max_date if calc_max_date else provided_price_max_date
+            else:
+                price_min = provided_price_min
+                price_max = provided_price_max
+                price_min_date = provided_price_min_date
+                price_max_date = provided_price_max_date
 
             with sqlite3.connect(str(self.db_path)) as conn:
                 conn.execute("""
@@ -150,8 +169,8 @@ class ApifyDB:
         price_min_date = None
         price_max_date = None
 
-        # 尝试多个历史价格字段
-        history_fields = ['price_new_history', 'price_amazon_history', 'price_buybox_history']
+        # 尝试多个历史价格字段（与 ApifyPriceFetcher 保持一致：Amazon > BuyBox > New）
+        history_fields = ['price_amazon_history', 'price_buybox_history', 'price_new_history']
         price_history = []
 
         for field in history_fields:

@@ -63,12 +63,12 @@ try:
 except ImportError:
     GEMINI_AVAILABLE = False
 
-# 尝试导入 Apify 价格获取器
+# 尝试导入 Keepa 价格获取器
 try:
-    from .apify_price import ApifyPriceFetcher, is_apify_available, APIFY_AVAILABLE
+    from .keepa_price import KeepaPriceFetcher, is_keepa_available, KEEPA_AVAILABLE
 except ImportError:
-    APIFY_AVAILABLE = False
-    is_apify_available = lambda: False
+    KEEPA_AVAILABLE = False
+    is_keepa_available = lambda: False
 
 
 class BatchScraper:
@@ -1081,23 +1081,26 @@ class BatchScraper:
             'distribution_before': distribution
         }
 
-    def enrich_with_sellerspirit_history(self, keyword: str) -> Dict[str, Any]:
+    def enrich_with_sellerspirit_history(self, keyword: str, cache_days: int = 20) -> Dict[str, Any]:
         """
-        步骤8.5：使用卖家精灵数据补充历史信息，并使用 Apify 获取价格历史
+        步骤7.5：使用卖家精灵数据补充历史信息
 
         补充以下数据：
         - 最近3个月销量 (sales_3m)
         - 卖家精灵月销量 (ss_monthly_sales)
-        - 历史最高价/最低价及对应时间（通过 Apify 获取）
+        - 上架日期 (listing_date)
+
+        支持缓存：已获取的数据会缓存到数据库，20天内不重复抓取
 
         Args:
             keyword: 搜索关键词
+            cache_days: 缓存有效期（天），默认 20 天
 
         Returns:
             补充结果字典
         """
         logger.info(f"{'='*60}")
-        logger.info(f"[步骤8.5] 数据补充 - 卖家精灵历史数据 + Apify 价格历史")
+        logger.info(f"[步骤7.5] 数据补充 - 卖家精灵历史数据")
         logger.info(f"{'='*60}")
 
         # 获取需要补充数据的 ASIN 列表
@@ -1112,17 +1115,26 @@ class BatchScraper:
 
         logger.info(f"  需要补充 {len(asins)} 个 ASIN 的历史数据...")
 
-        history_map = {}
-        has_price_history = 0
+        # 1. 先从缓存获取已有数据
+        cached_data = self.db.get_cached_sellerspirit_history(asins, cache_days)
+        cached_count = len(cached_data)
+        if cached_count > 0:
+            logger.info(f"  ✓ 从缓存获取 {cached_count} 个 ASIN 的历史数据")
 
-        # 第一步：使用卖家精灵 Hook 获取销量数据
-        if SELLERSPIRIT_HOOK_AVAILABLE:
+        # 2. 找出需要从 API 获取的 ASIN
+        asins_to_fetch = [asin for asin in asins if asin not in cached_data]
+        history_map = dict(cached_data)  # 复制缓存数据
+
+        # 3. 使用卖家精灵 Hook 获取缺失的数据
+        if asins_to_fetch and SELLERSPIRIT_HOOK_AVAILABLE:
+            logger.info(f"  需要从 API 获取 {len(asins_to_fetch)} 个 ASIN...")
             try:
                 token = sellerspirit_hook.login()
                 if token:
                     sellerspirit_hook.token = token
-                    chunks = chunk_list(asins, 40)
+                    chunks = chunk_list(asins_to_fetch, 40)
                     total_chunks = len(chunks)
+                    new_data = {}
 
                     logger.info(f"  [卖家精灵] 获取销量数据...")
                     for i, chunk in enumerate(chunks):
@@ -1158,89 +1170,47 @@ class BatchScraper:
                                 ss_rating = item.get('rating')
                                 ss_reviews = item.get('reviews')
 
-                                history_map[asin] = {
+                                asin_data = {
                                     'sales_3m': sales_stats['sales_3m'],
                                     'ss_monthly_sales': ss_monthly_sales,
-                                    'price_min': None,
-                                    'price_max': None,
-                                    'price_min_date': None,
-                                    'price_max_date': None,
                                     'listing_date': listing_date,
                                     'avg_monthly_sales': sales_stats['avg_monthly_sales'],
                                     'sales_months_count': sales_stats['sales_months_count'],
                                     'ss_rating': ss_rating,
-                                    'ss_reviews': ss_reviews
+                                    'ss_reviews': ss_reviews,
+                                    'raw_trends': trends  # 保存原始数据用于缓存
                                 }
+                                new_data[asin] = asin_data
+                                history_map[asin] = asin_data
 
                         if i < total_chunks - 1:
                             time.sleep(2)
 
-                    logger.info(f"  [卖家精灵] 获取完成: {len(history_map)} 个 ASIN")
+                    # 4. 保存新获取的数据到缓存
+                    if new_data:
+                        saved_to_cache = self.db.save_sellerspirit_history_cache(new_data)
+                        logger.info(f"  [卖家精灵] 获取完成: {len(new_data)} 个 ASIN，已缓存 {saved_to_cache} 条")
                 else:
                     logger.warning("  [卖家精灵] 登录失败")
             except Exception as e:
                 logger.error(f"  [卖家精灵] 获取失败: {e}")
-        else:
+        elif asins_to_fetch and not SELLERSPIRIT_HOOK_AVAILABLE:
             logger.warning("  [卖家精灵] Hook 不可用")
-            # 初始化空的 history_map
-            for asin in asins:
+            # 初始化空的数据
+            for asin in asins_to_fetch:
                 history_map[asin] = {
                     'sales_3m': None,
                     'ss_monthly_sales': None,
-                    'price_min': None,
-                    'price_max': None,
-                    'price_min_date': None,
-                    'price_max_date': None,
                     'listing_date': None,
                     'avg_monthly_sales': None,
                     'sales_months_count': None,
                     'ss_rating': None,
                     'ss_reviews': None
                 }
-
-        # 第二步：使用 Apify 获取价格历史
-        if is_apify_available():
-            try:
-                logger.info(f"  [Apify] 获取价格历史数据...")
-                apify_fetcher = ApifyPriceFetcher()
-
-                # 批量获取价格历史（Apify 支持批量）
-                price_history_map = apify_fetcher.get_multiple_price_history(asins, country='US')
-
-                # 合并价格历史到 history_map
-                for asin, price_data in price_history_map.items():
-                    if asin in history_map:
-                        history_map[asin]['price_min'] = price_data.get('price_min')
-                        history_map[asin]['price_max'] = price_data.get('price_max')
-                        history_map[asin]['price_min_date'] = price_data.get('price_min_date')
-                        history_map[asin]['price_max_date'] = price_data.get('price_max_date')
-                        if price_data.get('price_min') is not None:
-                            has_price_history += 1
-                    else:
-                        history_map[asin] = {
-                            'sales_3m': None,
-                            'ss_monthly_sales': None,
-                            'price_min': price_data.get('price_min'),
-                            'price_max': price_data.get('price_max'),
-                            'price_min_date': price_data.get('price_min_date'),
-                            'price_max_date': price_data.get('price_max_date'),
-                            'listing_date': None,
-                            'avg_monthly_sales': None,
-                            'sales_months_count': None,
-                            'ss_rating': None,
-                            'ss_reviews': None
-                        }
-                        if price_data.get('price_min') is not None:
-                            has_price_history += 1
-
-                logger.info(f"  [Apify] 获取完成: {has_price_history} 个 ASIN 有价格历史")
-
-            except Exception as e:
-                logger.error(f"  [Apify] 获取失败: {e}")
         else:
-            logger.warning("  [Apify] 不可用（未配置 APIFY_API_TOKEN 或未安装 apify-client）")
+            logger.info(f"  ✓ 所有数据均来自缓存，无需调用 API")
 
-        # 批量更新数据库
+        # 5. 批量更新数据库
         updated = 0
         if history_map:
             updated = self.db.batch_update_sellerspirit_history(keyword, history_map)
@@ -1253,7 +1223,7 @@ class BatchScraper:
             logger.info(f"    - 有3个月销量数据: {has_sales_3m} 个")
             logger.info(f"    - 有卖家精灵月销量: {has_ss_sales} 个")
             logger.info(f"    - 有上架日期: {has_listing} 个")
-            logger.info(f"    - 有价格历史: {has_price_history} 个")
+            logger.info(f"    - 来自缓存: {cached_count} 个，来自 API: {len(asins_to_fetch) - len([a for a in asins_to_fetch if a not in history_map])} 个")
         else:
             logger.warning("  未能获取任何历史数据")
 
@@ -1261,11 +1231,89 @@ class BatchScraper:
             'success': True,
             'enriched_count': updated,
             'total_asins': len(asins),
+            'from_cache': cached_count,
+            'from_api': len(asins_to_fetch),
             'has_sales_3m': sum(1 for v in history_map.values() if v.get('sales_3m')) if history_map else 0,
             'has_ss_monthly_sales': sum(1 for v in history_map.values() if v.get('ss_monthly_sales')) if history_map else 0,
-            'has_listing_date': sum(1 for v in history_map.values() if v.get('listing_date')) if history_map else 0,
-            'has_price_history': has_price_history
+            'has_listing_date': sum(1 for v in history_map.values() if v.get('listing_date')) if history_map else 0
         }
+
+    def enrich_with_keepa_price_history(self, keyword: str) -> Dict[str, Any]:
+        """
+        步骤8.5：使用 Keepa 获取价格历史数据
+
+        补充以下数据：
+        - 历史最低价 (price_min)
+        - 历史最高价 (price_max)
+        - 最低价日期 (price_min_date)
+        - 最高价日期 (price_max_date)
+
+        Args:
+            keyword: 搜索关键词
+
+        Returns:
+            补充结果字典
+        """
+        logger.info(f"{'='*60}")
+        logger.info(f"[步骤8.5] 数据补充 - Keepa 价格历史")
+        logger.info(f"{'='*60}")
+
+        # 获取需要补充数据的 ASIN 列表（筛选后的）
+        asins = self.db.get_asins_for_enrichment(keyword)
+        if not asins:
+            logger.info("  没有需要补充价格历史的 ASIN")
+            return {
+                'success': True,
+                'enriched_count': 0,
+                'total_asins': 0,
+                'has_price_history': 0
+            }
+
+        logger.info(f"  需要补充 {len(asins)} 个 ASIN 的价格历史...")
+
+        has_price_history = 0
+
+        if not is_keepa_available():
+            logger.warning("  [Keepa] 不可用（未配置 KEEPA_API_KEY 或依赖缺失）")
+            return {
+                'success': False,
+                'enriched_count': 0,
+                'total_asins': len(asins),
+                'has_price_history': 0,
+                'error': 'Keepa 不可用'
+            }
+
+        try:
+            logger.info("  [Keepa] 获取价格历史数据...")
+            keepa_fetcher = KeepaPriceFetcher()
+            keepa_history_map = keepa_fetcher.get_multiple_price_history(asins, country='US')
+
+            # 更新数据库
+            updated = 0
+            for asin, price_data in keepa_history_map.items():
+                if price_data.get('price_min') is not None:
+                    self.db.update_price_history(keyword, asin, price_data)
+                    has_price_history += 1
+                    updated += 1
+
+            logger.info(f"  ✓ Keepa 数据补充完成: {has_price_history} 个 ASIN 有价格历史")
+
+            return {
+                'success': True,
+                'enriched_count': updated,
+                'total_asins': len(asins),
+                'has_price_history': has_price_history
+            }
+
+        except Exception as e:
+            logger.error(f"  [Keepa] 获取失败: {e}")
+            return {
+                'success': False,
+                'enriched_count': 0,
+                'total_asins': len(asins),
+                'has_price_history': 0,
+                'error': str(e)
+            }
 
     def filter_by_listing_date(
         self,
@@ -1696,6 +1744,22 @@ class BatchScraper:
             'skipped': step8_result.get('skipped', False)
         })
 
+        # 步骤8.5: Keepa 价格历史补充（在所有筛选完成后）
+        step8_5_start = time.time()
+        step8_5_result = self.enrich_with_keepa_price_history(keyword)
+        step8_5_duration = time.time() - step8_5_start
+
+        step_stats.append({
+            'step': '步骤8.5',
+            'name': 'Keepa价格历史',
+            'data_count': step8_5_result.get('has_price_history', 0),
+            'removed': 0,
+            'pages': 0,
+            'duration': step8_5_duration,
+            'from_cache': False,
+            'skipped': not step8_5_result.get('success', False)
+        })
+
         # 步骤9: 导出 CSV（按价格排序）
         step9_start = time.time()
         logger.info(f"{'='*60}")
@@ -1758,7 +1822,7 @@ class BatchScraper:
             elif stat['step'] in ('步骤5', '步骤6', '步骤7', '步骤7.6', '步骤8'):
                 removed = stat.get('removed', 0)
                 data_str = f"保留{data_count}(-{removed})"
-            elif stat['step'] == '步骤7.5':
+            elif stat['step'] in ('步骤7.5', '步骤8.5'):
                 data_str = f"{data_count} 条"
             elif stat['step'] == '步骤9':
                 data_str = f"{data_count} 条"

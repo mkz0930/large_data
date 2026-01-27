@@ -6,6 +6,47 @@
 
 ---
 
+## [1.4.2] - 2026-01-27
+
+### 新增
+
+- 卖家精灵历史数据缓存功能
+  - 步骤7.5 数据补充时，已获取的卖家精灵数据会缓存到数据库
+  - 缓存有效期 20 天，20 天内不重复抓取相同 ASIN
+  - 大幅减少 API 调用次数，提升抓取效率
+
+### 变更
+
+- `src/database.py` - 新增缓存相关方法
+  - 新增 `sellerspirit_history_cache` 表存储缓存数据
+  - `get_cached_sellerspirit_history()` - 获取缓存的历史数据
+  - `save_sellerspirit_history_cache()` - 保存历史数据到缓存
+  - `get_asins_needing_history_fetch()` - 获取需要从 API 获取的 ASIN 列表
+
+- `src/scraper.py` - `enrich_with_sellerspirit_history` 方法
+  - 新增 `cache_days` 参数，可自定义缓存有效期（默认 20 天）
+  - 优先从缓存获取数据，仅对缺失的 ASIN 调用 API
+  - 新获取的数据自动保存到缓存
+
+### 数据库表结构
+
+新增 `sellerspirit_history_cache` 表：
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `asin` | TEXT | ASIN 码（唯一） |
+| `sales_3m` | INTEGER | 最近3个月销量 |
+| `ss_monthly_sales` | INTEGER | 卖家精灵月销量 |
+| `listing_date` | TEXT | 上架日期 |
+| `avg_monthly_sales` | INTEGER | 平均月销量 |
+| `sales_months_count` | INTEGER | 有销量数据的月份数 |
+| `ss_rating` | REAL | 卖家精灵评分 |
+| `ss_reviews` | INTEGER | 卖家精灵评论数 |
+| `raw_trends` | TEXT | 原始 trends 数据（JSON） |
+| `updated_at` | TEXT | 缓存更新时间 |
+
+---
+
 ## [1.4.1] - 2026-01-27
 
 ### 修复
