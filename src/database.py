@@ -182,7 +182,7 @@ class BatchScraperDB:
                         parse_price(item.get('price')),
                         item.get('stars') or item.get('rating'),
                         item.get('total_reviews') or item.get('ratings_total'),
-                        parse_sales(item.get('purchase_history_message')),
+                        item.get('sales_volume') if item.get('sales_volume') is not None else parse_sales(item.get('purchase_history_message')),
                         item.get('page'),
                         item.get('url'),
                         1 if item.get('is_sponsored') else 0

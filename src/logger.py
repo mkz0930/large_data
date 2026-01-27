@@ -20,7 +20,9 @@ LOG_FORMAT = "[%(asctime)s] [%(levelname)s] [%(name)s] %(message)s"
 DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
 
 # 已配置的 logger 缓存
-_loggers: dict[str, logging.Logger] = {}
+# NOTE: Python 3.8 does not support built-in generics like dict[str, ...]
+from typing import Dict
+_loggers: Dict[str, logging.Logger] = {}
 
 
 def setup_logger(

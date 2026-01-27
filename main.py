@@ -105,13 +105,13 @@ def parse_args(args: List[str] = None) -> argparse.Namespace:
     parser.add_argument(
         '--top-categories', '-t',
         type=int,
-        default=100,
+        default=3,
         help='扩展抓取前 N 个热门分类 (默认: 3)'
     )
     parser.add_argument(
         '--category-pages',
         type=int,
-        default=100,
+        default=50,
         help='每个分类最大页数 (默认: 50)'
     )
     parser.add_argument(
