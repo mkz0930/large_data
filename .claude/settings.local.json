@@ -1,16 +1,4 @@
 {
-  "hooks": {
-    "SessionStart": [
-      {
-        "hooks": [
-          {
-            "type": "prompt",
-            "prompt": "自动加载编码规范：请读取并遵循 .claude/skills/prules/SKILL.md 中的所有规则。这是用户的个人编码标准，包括 TDD、文档维护、4阶段工作流程等要求。任何涉及代码变更的任务都必须遵循此规范。"
-          }
-        ]
-      }
-    ]
-  },
   "permissions": {
     "allow": [
       "Bash(awk:*)",
@@ -87,10 +75,28 @@
       "Bash(powershell.exe -ExecutionPolicy Bypass -File \"D:\\\\Product\\\\data_summary\\\\.claude\\\\skills\\\\prules\\\\install.ps1\" -TargetProject \"D:\\\\learn\\\\test_skill\")",
       "Bash(wc:*)",
       "Bash(claude config list:*)",
-      "Bash(du:*)"
+      "Bash(du:*)",
+      "WebFetch(domain:keepa.com)",
+      "WebFetch(domain:github.com)",
+      "Bash(pip search:*)",
+      "Bash(pip index:*)",
+      "Bash(pip show:*)",
+      "WebFetch(domain:pypi.org)"
     ],
     "additionalDirectories": [
       "d:\\Product\\data_summary\\output"
+    ]
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "prompt",
+            "prompt": "自动加载编码规范：请读取并遵循 .claude/skills/prules/SKILL.md 中的所有规则。这是用户的个人编码标准，包括 TDD、文档维护、4阶段工作流程等要求。任何涉及代码变更的任务都必须遵循此规范。"
+          }
+        ]
+      }
     ]
   },
   "language": "zh-cn"
